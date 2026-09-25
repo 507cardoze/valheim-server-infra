@@ -1,0 +1,11 @@
+# Copy this file to terraform.tfvars and replace every placeholder.
+# terraform.tfvars is ignored by Git.
+
+image_id   = "REPLACE_WITH_UBUNTU_24_04_IMAGE_ID"
+flavor_id  = "REPLACE_WITH_2_VCPU_4GB_FLAVOR_ID"
+ssh_key_id = "REPLACE_WITH_CLOUDING_SSH_KEY_ID"
+admin_cidr = "REPLACE_WITH_YOUR_PUBLIC_IP/32"
+
+# Clouding-managed VM backups may add cost. The Valheim world timer and
+# optional B2 backup are configured separately on the server.
+clouding_backup_enabled = false

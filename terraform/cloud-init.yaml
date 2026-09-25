@@ -1,0 +1,217 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+
+write_files:
+  - path: /etc/valheim/valheim.env
+    owner: root:root
+    permissions: "0600"
+    content: |
+      VALHEIM_NAME="Valheim Server"
+      VALHEIM_WORLD="Dedicated"
+      VALHEIM_PASSWORD="CHANGE_ME"
+      VALHEIM_PORT="2456"
+      VALHEIM_PUBLIC="1"
+      VALHEIM_EXTRA_ARGS=""
+
+  - path: /etc/valheim/backup.env
+    owner: root:root
+    permissions: "0600"
+    content: |
+      # Optional Backblaze B2 configuration, following PH-Control's naming.
+      # Use a bucket-scoped Application Key, not a master key.
+      # B2_S3_ENDPOINT="https://s3.example-region.backblazeb2.com"
+      # B2_S3_REGION="example-region"
+      # B2_BUCKET="valheim-world-backups"
+      # B2_KEY_ID=""
+      # B2_APPLICATION_KEY=""
+      # RESTIC_REPOSITORY="" # Optional override; defaults to the B2 bucket.
+      # RESTIC_PASSWORD_FILE="/etc/valheim/restic-password"
+
+  - path: /usr/local/bin/valheim-server
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      source /etc/valheim/valheim.env
+
+      if [[ "$VALHEIM_PASSWORD" == "CHANGE_ME" || ${#VALHEIM_PASSWORD} -lt 5 ]]; then
+        echo "Set a real VALHEIM_PASSWORD in /etc/valheim/valheim.env before starting Valheim." >&2
+        exit 1
+      fi
+
+      args=(
+        -nographics
+        -batchmode
+        -name "$VALHEIM_NAME"
+        -port "$VALHEIM_PORT"
+        -world "$VALHEIM_WORLD"
+        -password "$VALHEIM_PASSWORD"
+        -public "$VALHEIM_PUBLIC"
+        -savedir /opt/valheim/data
+      )
+
+      if [[ -n "${VALHEIM_EXTRA_ARGS:-}" ]]; then
+        read -r -a extra_args <<< "$VALHEIM_EXTRA_ARGS"
+        args+=("${extra_args[@]}")
+      fi
+
+      exec /opt/valheim/server/valheim_server.x86_64 "${args[@]}"
+
+  - path: /etc/systemd/system/valheim.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Valheim Dedicated Server
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=valheim
+      Group=valheim
+      WorkingDirectory=/opt/valheim/server
+      ExecStart=/usr/local/bin/valheim-server
+      Restart=on-failure
+      RestartSec=15
+      KillSignal=SIGINT
+      TimeoutStopSec=120
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/sbin/valheim-backup
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      umask 077
+
+      backup_dir=/var/backups/valheim
+      world_dir=/opt/valheim/data/worlds_local
+      retention_days=14
+      was_active=0
+
+      install -d -m 700 "$backup_dir"
+
+      if ! compgen -G "$world_dir/*.db" >/dev/null 2>&1; then
+        echo "No Valheim world database found; skipping backup."
+        exit 0
+      fi
+
+      restart_server() {
+        if [[ "$was_active" -eq 1 ]]; then
+          systemctl start valheim
+        fi
+      }
+      trap restart_server EXIT
+
+      if systemctl is-active --quiet valheim; then
+        systemctl stop valheim
+        was_active=1
+      fi
+
+      timestamp=$(date -u +%Y%m%d%H%M%S)
+      archive="$backup_dir/worlds-$timestamp.tgz"
+      tar -czf "$archive" -C "$world_dir" .
+      find "$backup_dir" -type f -name 'worlds-*.tgz' -mtime "+$retention_days" -delete
+
+      if [[ -f /etc/valheim/backup.env ]]; then
+        set -a
+        source /etc/valheim/backup.env
+        set +a
+      fi
+
+      if [[ -n "${B2_S3_ENDPOINT:-}" ]]; then
+        : "${B2_S3_REGION:?B2_S3_REGION is required when B2 is configured}"
+        : "${B2_BUCKET:?B2_BUCKET is required when B2 is configured}"
+        : "${B2_KEY_ID:?B2_KEY_ID is required when B2 is configured}"
+        : "${B2_APPLICATION_KEY:?B2_APPLICATION_KEY is required when B2 is configured}"
+        export AWS_ACCESS_KEY_ID="$B2_KEY_ID"
+        export AWS_SECRET_ACCESS_KEY="$B2_APPLICATION_KEY"
+        export AWS_DEFAULT_REGION="$B2_S3_REGION"
+        RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-s3:${B2_S3_ENDPOINT%/}/${B2_BUCKET}/valheim-worlds}"
+      fi
+
+      if [[ -n "${RESTIC_REPOSITORY:-}" ]]; then
+        : "${RESTIC_PASSWORD_FILE:?RESTIC_PASSWORD_FILE is required for off-site backups}"
+        restic backup "$archive" --tag valheim-world
+        restic forget --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune
+      fi
+
+  - path: /etc/systemd/system/valheim-backup.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Back up Valheim worlds
+      After=valheim.service
+      RequiresMountsFor=/opt/valheim/data
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/valheim-backup
+
+  - path: /etc/systemd/system/valheim-backup.timer
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Daily Valheim world backup
+
+      [Timer]
+      OnCalendar=*-*-* 03:00:00 UTC
+      Persistent=true
+      RandomizedDelaySec=15m
+      Unit=valheim-backup.service
+
+      [Install]
+      WantedBy=timers.target
+
+  - path: /usr/local/sbin/valheim-bootstrap
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+
+      apt-get update
+      apt-get install -y software-properties-common
+      add-apt-repository -y multiverse
+      apt-get update
+      apt-get install -y ca-certificates libatomic1 libpulse-dev libpulse0 restic steamcmd ufw
+
+      if ! id -u valheim >/dev/null 2>&1; then
+        useradd --system --create-home --home-dir /home/valheim --shell /usr/sbin/nologin valheim
+      fi
+
+      install -d -o valheim -g valheim /opt/valheim/server
+      install -d -o valheim -g valheim /opt/valheim/data/worlds_local
+
+      runuser -u valheim -- /usr/games/steamcmd \
+        +force_install_dir /opt/valheim/server \
+        +login anonymous \
+        +app_update 896660 validate \
+        +quit
+
+      chown -R valheim:valheim /opt/valheim
+      install -d -m 700 /var/backups/valheim
+
+      ufw default deny incoming
+      ufw default allow outgoing
+      ufw allow 22/tcp comment 'SSH'
+      ufw allow 2456:2457/udp comment 'Valheim'
+      ufw --force enable
+
+      systemctl daemon-reload
+      systemctl enable valheim
+      systemctl enable --now valheim-backup.timer
+      echo "Valheim is installed. Set /etc/valheim/valheim.env, then run: systemctl start valheim"
+
+runcmd:
+  - [bash, /usr/local/sbin/valheim-bootstrap]
