@@ -6,6 +6,7 @@ provider "registry.terraform.io/renemontilva/clouding" {
   constraints = "1.0.1"
   hashes = [
     "h1:R926W6nqYRYQpwLTwHtQ9nLBOR4oi2skGzhLccqD38g=",
+    "h1:YlLCHWZ0KDPYLw6VPBict8KKsHZVcm0pvWW/kNGjIno=",
     "zh:187eb96cd2a0768727d735a1a2d0795e46fd783405c133376251d9f24c8effe4",
     "zh:5ac07c6342f45dccedb7fdb2ab8f62ab008b13c0d9b0290b7ae8af59bae55613",
     "zh:700f9e08c12ac505307ca08a5516b546a0e5c3f392aae5909fde9f2fa3992000",
