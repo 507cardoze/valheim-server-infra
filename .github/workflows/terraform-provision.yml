@@ -26,6 +26,7 @@ defaults:
 jobs:
   provision:
     name: Terraform ${{ inputs.action }}
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: provisioning
 
@@ -41,7 +42,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Guard apply branch
         if: inputs.action == 'apply' && github.ref != 'refs/heads/main'
@@ -50,7 +53,7 @@ jobs:
           exit 1
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
         with:
           terraform_version: 1.16.2
           terraform_wrapper: false
@@ -72,6 +75,7 @@ jobs:
       - name: Terraform init with remote state
         run: >-
           terraform init -input=false
+          -lockfile=readonly
           -backend-config="organization=${TF_CLOUD_ORGANIZATION}"
           -backend-config="workspaces.name=${TF_WORKSPACE}"
 

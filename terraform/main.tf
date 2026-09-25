@@ -42,5 +42,5 @@ resource "clouding_server" "valheim" {
     slots     = var.clouding_backup_slots
   } : null
 
-  user_data = file("${path.module}/cloud-init.yaml")
+  user_data = replace(file("${path.module}/cloud-init.yaml"), "__ADMIN_CIDR__", var.admin_cidr)
 }

@@ -35,7 +35,8 @@ es la llave privada.
 - En el Environment de GitHub llamado `provisioning`, guardar los secretos
   `CLOUDING_TOKEN`, `TF_API_TOKEN`, `CLOUDING_IMAGE_ID`,
   `CLOUDING_FLAVOR_ID`, `CLOUDING_SSH_KEY_ID` y `VALHEIM_ADMIN_CIDR`.
-- Proteger ese Environment con aprobación manual si se habilita `apply`.
+- Restringir ese Environment a la rama `main` y exigir aprobación manual antes
+  de cualquier ejecución que use secretos, especialmente `apply`.
 
 La llave privada SSH no se usa para crear la VPS ni debe entrar en Terraform
 State. Solo será necesaria después, para migrar o restaurar el mundo.
@@ -62,7 +63,7 @@ Application Key limitada a ese bucket. Ningún valor se guarda en Git.
 Desde la raíz del repositorio:
 
 ```powershell
-terraform -chdir=terraform init -backend=false
+terraform -chdir=terraform init -backend=false -lockfile=readonly
 terraform -chdir=terraform fmt -check -recursive
 terraform -chdir=terraform validate
 ```
@@ -92,7 +93,9 @@ El wrapper solicita los tokens que falten sin escribirlos a disco:
 
 - Pull requests y pushes a `main` ejecutan solo formato, inicialización sin
   backend y validación.
-- `Terraform Provision` se ejecuta manualmente con `workflow_dispatch`.
+- `Terraform Provision` se ejecuta manualmente con `workflow_dispatch`, pero
+  el job solo acepta la rama `main` para evitar exponer secretos desde ramas
+  arbitrarias.
 - `plan` genera una previsualización.
 - `apply` está permitido únicamente en `main` y requiere el Environment
   `provisioning`.
@@ -139,8 +142,9 @@ journalctl -u valheim-backup.service
 
 Para activar el backup externo, completar `/etc/valheim/backup.env`, crear el
 archivo de contraseña de Restic con permisos `0600` y ejecutar el servicio una
-vez manualmente. Si B2 no está parametrizado, el sistema conserva solamente
-los backups locales.
+vez manualmente. La limpieza de Restic filtra por el tag `valheim-world`; aun
+así, usa un repositorio dedicado. Si B2 no está parametrizado, el sistema
+conserva solamente los backups locales.
 
 ### 8. Restaurar un backup
 
@@ -190,6 +194,8 @@ archivo elegido:
   pérdida completa de la VPS.
 - Backups administrados por Clouding: opcionales y deshabilitados por defecto
   para evitar cargos inesperados.
+- Actualizaciones de seguridad de Ubuntu: habilitadas mediante
+  `unattended-upgrades`.
 - HCP Terraform solo guarda el state de infraestructura; nunca el mundo de
   Valheim.
 
@@ -197,4 +203,8 @@ archivo elegido:
 
 No guardar en el repositorio tokens, contraseñas, llaves privadas, archivos
 `.tfvars` reales ni valores de B2. `terraform.tfvars` está ignorado por Git y
-los secretos de CI deben vivir en GitHub Environment Secrets.
+los secretos de CI deben vivir en GitHub Environment Secrets. Los scripts SSH
+exigen `StrictHostKeyChecking=yes`; registra y verifica la huella del servidor
+antes de usarlos. `admin_cidr` se aplica tanto al firewall de Clouding como a
+UFW y se rechaza `0.0.0.0/0`/`::/0`. Las acciones de GitHub están fijadas a
+commits y Dependabot propone sus actualizaciones.

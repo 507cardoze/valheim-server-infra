@@ -4,4 +4,10 @@
 *.tfplan
 crash.log
 *.tfvars
+*.tfvars.json
 !terraform.tfvars.example
+.env
+.env.*
+!.env.example
+*.pem
+*.key

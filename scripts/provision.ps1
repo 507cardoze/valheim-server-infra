@@ -70,6 +70,7 @@ try {
       "-chdir=terraform",
       "init",
       "-input=false",
+      "-lockfile=readonly",
       "-backend-config=organization=$HcpOrganization",
       "-backend-config=workspaces.name=$Workspace"
     )
@@ -106,4 +107,3 @@ finally {
     Remove-Item Env:TF_TOKEN_app_terraform_io -ErrorAction SilentlyContinue
   }
 }
-

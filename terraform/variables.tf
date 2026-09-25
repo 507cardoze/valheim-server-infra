@@ -100,4 +100,9 @@ variable "admin_cidr" {
     condition     = trimspace(var.admin_cidr) != ""
     error_message = "admin_cidr must not be empty."
   }
+
+  validation {
+    condition     = !contains(["0.0.0.0/0", "::/0"], trimspace(var.admin_cidr))
+    error_message = "admin_cidr must not allow SSH from the entire internet."
+  }
 }
